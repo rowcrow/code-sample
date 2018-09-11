@@ -1,0 +1,254 @@
+---
+title: "Proficiency Testing Statistical Analysis: Rounds 1,2 and 3"
+date: "Sept 6, 2016"
+output: 
+  word_document:
+    reference_docx: word-styles-reference.docx
+---
+Rowena Crow MD MSPH, Statistical Analyst, 
+
+
+##I. Samples  
+Labs participated in 3 rounds of proficiency testing. For each round, 3 separate samples were sent to each of the participating labs. Each labs tested the samples for each of the following measurands: THC, THCA, CBD, CBDA, and CBN. 
+
+##II. Statistical Package  
+All statistical analyses were completed using the free open source statistical software R and RStudio. To ensure reproducible results, the write up of the statistical analyses were done in RMarkdown, a package within RStudio. Information about the R version and the packages installed for this analysis can be found in section *VIII. R Session Information and References* of this report.
+
+
+```{r, eval=TRUE, echo=FALSE, cache=TRUE, warning=FALSE}
+#install.packages("knitr")
+library(knitr)
+#install.packages("dunn.test")
+#library(dunn.test)
+#install.packages('graphics')
+#install.packages("extrafont")
+suppressPackageStartupMessages(library("extrafont"))
+suppressPackageStartupMessages(library("dplyr"))
+#library(extrafont)
+library(graphics)
+#install.packages('ggplot2')
+library(ggplot2)
+#install.packages("metRology")
+#install.packages("FSA")
+#library(FSA)
+# open google doc gsheet
+#install.packages("googlesheets")
+#install.packages("httpuv")
+
+
+#**Reading Data**
+#Setting the working directory and reading in the data 
+
+# for mac
+#setwd("~/Google Drive/Data")
+# for windows
+#setwd("****")
+#previous method - data input from reading csv file  
+pt<-read.csv("Potency Proficiency Testing clean.csv")
+# read from google spreadsheet
+#library("httpuv", lib.loc="/Library/Frameworks/R.framework/Versions/3.3/Resources/library")
+#library(googlesheets)
+#pt <- gs_read(pt_ss, ws = "Form Responses 1")
+#pt_ss <- gs_title("Potency Proficiency Testing clean.csv")
+
+
+
+#############################################
+# set up global variables
+# number of rounds in google sheet 
+# Create a vector of rounds - up to 3
+round<-c(1,2,3)
+round_labels <- c('1' = "Round 1", '2' = "Round 2", '3' = "Round 3")
+num_rounds<-3
+ 
+# calc number of labs in google sheet 
+labs<-subset(pt, !duplicated(Laboratory), select = Laboratory)
+num_labs<- nrow(na.omit(labs))
+
+#############################################
+
+#unique lab ID - create random lab IDs one char 2 digits
+
+# Function idmaker #####################################
+idmaker <- function(x)
+{
+  max.val = x*1
+  # find out how many 'numbers' each ID  will have after the letter
+  count <- nchar(as.character(max.val))  
+  # set the variable to be fed into  'sprintf' to ensure we have leading 0's
+  size <- paste("%0",count,"d",sep="")  
+  # randomising the letters 
+  lets <- toupper(sample(letters,x, replace=T))    
+  # randominsing the numbers, and ensuing they all have the same number of characters
+  nums <- sprintf(size,sample(1:max.val))         
+  # joining them together
+  ids <- paste(lets,nums,sep="")                             
+  return(ids)
+}
+# end function ########################################################
+
+labs$id<-idmaker(num_labs)
+lab_id<-labs$id
+pt <- left_join(pt, labs, by='Laboratory', match='all')
+
+# create count for number of samples and number of replicates for each lab, each round
+# for each round
+for(j in 1:num_rounds) {
+# for each lab
+  ii=1
+  for(i in lab_id) {
+    # calc number of samples, number of replicates
+    # need id_num for Kruskal Wallis Test 
+    pt$id_num[pt$Round==j & pt$id==i]<-ii
+    pt_samples <- subset(pt, id == i & Round==j, select = Sample)
+    pt$num_samples[pt$Round==j & pt$id==i] <- nrow(unique(pt_samples, incomparables = FALSE))
+    pt_replicates <- subset(pt, id == i & Round==j, select = 'Replication')
+    pt$num_replicates[pt$Round==j & pt$id==i] <- nrow(unique(pt_replicates, incomparables = FALSE))
+    ii<-ii+1
+  }
+}
+######################################################
+```
+
+##III. Calculating Total THC (%) 
+
+To evaluate variation in conversion of THCA to THC, percent total THC was calculated by adding percent THCA and percent THC. All analyses were done on percent total THC, THC, and THCA. Comparisons were made between the three measures to identify potential variation in the conversion of THCA to THC. 
+
+```{r, eval=TRUE, echo=TRUE, cache=TRUE, warning=FALSE}
+#total THC calculation for every observation
+pt$tot_thc=pt$THC+pt$THCA
+```
+-----
+```{r, eval=TRUE, echo=FALSE, cache=TRUE, warning=FALSE}
+
+# for each round
+for(j in 1:num_rounds) {
+ 
+# Mean, SD, and 95% CI loop calculations for each lab 
+  for(i in lab_id) {
+    denom<-pt$num_samples[pt$Round==j & pt$id==i]*pt$num_replicates[pt$Round==j & pt$id==i]
+    ci_tot_thc<-1.96*(sd(pt$tot_thc[pt$Round==j & pt$id==i])/sqrt(denom))
+    #Total THC
+        pt$tot_thc_lmean[pt$Round==j & pt$id==i]<-mean(pt$tot_thc[pt$Round==j & pt$id==i])
+        pt$tot_thc_lsd[pt$Round==j & pt$id==i]<-sd(pt$tot_thc[pt$Round==j & pt$id==i])
+        ci_tot_thc<-1.96*(sd(pt$tot_thc[pt$Round==j & pt$id==i])/sqrt(denom))
+        pt$tot_thc_95lci[pt$Round==j & pt$id==i]<-pt$tot_thc_lmean[pt$Round==j & pt$id==i]-ci_tot_thc
+        pt$tot_thc_95uci[pt$Round==j & pt$id==i]<-pt$tot_thc_lmean[pt$Round==j & pt$id==i]+ci_tot_thc
+     
+    #THC
+        pt$thc_lmean[pt$Round==j & pt$id==i]<-mean(pt$THC[pt$Round==j & pt$id==i])
+        pt$thc_lsd[pt$Round==j & pt$id==i]<-sd(pt$THC[pt$Round==j & pt$id==i])
+        ci_thc<-1.96*(sd(pt$THC[pt$Round==j & pt$id==i])/sqrt(denom))
+        pt$thc_95lci[pt$Round==j & pt$id==i]<-pt$thc_lmean[pt$Round==j & pt$id==i]-ci_thc
+        pt$thc_95uci[pt$Round==j & pt$id==i]<-pt$thc_lmean[pt$Round==j & pt$id==i]+ci_thc
+  
+    #THCA
+        pt$thca_lmean[pt$Round==j & pt$id==i]<-mean(pt$THCA[pt$Round==j & pt$id==i])
+        pt$thca_lsd[pt$Round==j & pt$id==i]<-sd(pt$THCA[pt$Round==j & pt$id==i])
+        ci_thca<-(1.96*(sd(pt$THCA[pt$Round==j & pt$id==i])/sqrt(denom)))
+        pt$thca_95lci[pt$Round==j & pt$id==i]<-pt$thca_lmean[pt$Round==j & pt$id==i]-ci_thca
+        pt$thca_95uci[pt$Round==j & pt$id==i]<-pt$thca_lmean[pt$Round==j & pt$id==i]+ci_thca
+
+    #CBD
+        pt$cbd_lmean[pt$Round==j & pt$id==i]<-mean(pt$CBD[pt$Round==j & pt$id==i])
+        pt$cbd_lsd[pt$Round==j & pt$id==i]<-sd(pt$CBD[pt$id==i])
+        ci_cbd<-(1.96*(sd(pt$CBD[pt$id==i])/sqrt(denom)))
+        pt$cbd_95uci[pt$Round==j & pt$id==i]<-pt$cbd_lmean[pt$Round==j & pt$id==i]+ci_cbd
+        pt$cbd_95lci[pt$Round==j & pt$id==i]<-pt$cbd_lmean[pt$Round==j & pt$id==i]-ci_cbd
+
+    #CBDA
+        pt$cbda_lmean[pt$Round==j & pt$id==i]<-mean(pt$CBDA[pt$Round==j & pt$id==i])
+        pt$cbda_lsd[pt$Round==j & pt$id==i]<-sd(pt$CBDA[pt$Round==j & pt$id==i])
+        ci_cbda<-(1.96*(sd(pt$CBDA[pt$Round==j & pt$id==i])/sqrt(denom)))
+        pt$cbda_95lci[pt$Round==j & pt$id==i]<-pt$cbda_lmean[pt$Round==j & pt$id==i]-ci_cbda
+        pt$cbda_95uci[pt$Round==j & pt$id==i]<-pt$cbda_lmean[pt$Round==j & pt$id==i]+ci_cbda
+
+    #CBN
+        pt$cbn_lmean[pt$Round==j & pt$id==i]<-mean(pt$CBN[pt$Round==j & pt$id==i])
+        pt$cbn_lsd[pt$Round==j & pt$id==i]<-sd(pt$CBN[pt$Round==j & pt$id==i])
+        ci_cbn<-(1.96*(sd(pt$CBN[pt$Round==j & pt$id==i])/sqrt(denom)))
+        pt$cbn_95uci[pt$Round==j & pt$id==i]<-pt$cbn_lmean[pt$Round==j & pt$id==i]+ci_cbn
+        pt$cbn_95lci[pt$Round==j & pt$id==i]<-pt$cbn_lmean[pt$Round==j & pt$id==i]-ci_cbn
+
+  } #end labs loop
+}   #end rounds loop
+```
+
+##IV. Initial Examination of Results  
+
+##Forest Plots of Means and 95% CI for Each Measurand for Each Lab  
+
+Laboratory specific distributions were compared between laboratories visually through forest plots of means and 95% CI for total THC, THC, and THCA. Forest plots could not be made for CBD, CBDA, and CBN due to incomplete results. Variations between laboratories were analyzed through a nonparametric Kruskal-Wallis rank sum test to examine potential outliers. If the Kruskal-Wallis test was significant at a *p* value of less or equal to 0.05, differences between the labs were identified using a Dunn's test with Bonferroni adjusted *p* values to account for multiple comparisons. Adjusted *p* values less than or equal to 0.05 were considered significantly different.
+
+
+```{r, eval=TRUE, echo=FALSE, cache=TRUE, warning=FALSE, fig.}
+
+#Figure 1. Forest Plot of Mean Total THC for each lab, each Round
+f1<-ggplot(data=pt,aes(x=tot_thc_lmean,y=id))+
+  ggtitle("Figure 1. Mean Total THC (%) and 95% CI")+
+  geom_point(colour = '#00953A', size = 3)+
+  geom_errorbarh(aes(xmin=tot_thc_95lci,xmax=tot_thc_95uci),height=0.667, color="#00953A")+
+  xlab("Mean Total THC and 95% CI (%)")+
+  ylab("Lab ID")
+ 
+  f1 +facet_wrap(~Round,labeller=labeller(Round = round_labels), scales="free")
+
+# for each round
+#for(j in 1:num_rounds) {
+#  print(paste0("Round ", j))
+  #Kruskal Wallis Test
+#  print(kruskal.test(tot_thc~id_num, data=pt,Round==j))
+  #Dunn Test post hoc test  for each round
+#  pt_round <- subset(pt, Round==j)
+#  print(dunnTest(pt_round$tot_thc~id, data=pt_round, method="bonferroni", two.sided = TRUE))
+#}
+```
+
+###Summary Statistics  
+
+A histogram of all samples from all labs was examined visually for normality and symmetry for each measurand (total THC, THC, THCA, CBDA, and CBN) 
+```{r, eval=TRUE, echo=FALSE, cache=TRUE, warning=FALSE}
+
+opar<-par(mfrow=c(2,3))
+par(family="Trebuchet MS", font.axis=10, font.lab=11, font.main=14, adj=0.5)
+#title("My Title", outer=TRUE)
+# for each round
+#for(j in 1:num_rounds) {
+  #print(paste0("Round ", j))  
+  j=1
+  opar<-par(mfrow=c(2,3))
+
+  #Histogram of all total THC measures
+  hist(pt$tot_thc[pt$Round==j], freq=TRUE, main=expression(""), xlab=expression(bold("Total THC (%)")), ylab = expression(bold(Frequency)), col.axis="#5C666F", col.main="#5C666F", fg="#5C666F", col.lab="#5C666F")
+
+  #Histogram of all THC measures
+  hist(pt$THC[pt$Round==j],freq=TRUE, main=expression(""), xlab=expression(bold("THC (%)")), ylab = expression(bold(Frequency)), col.axis="#5C666F", col.main="#5C666F", fg="#5C666F", col.lab="#5C666F")
+
+  #Histogram of all THCA measures
+  hist(pt$THCA[pt$Round==j],freq=TRUE, main=expression("") , xlab=expression(bold("THCA (%)")), ylab = expression(bold(Frequency)), col.axis="#5C666F", col.main="#5C666F", fg="#5C666F", col.lab="#5C666F")
+
+  #Histogram of all CBD measures
+  hist(pt$CBD[pt$Round==j], freq=TRUE, main=expression(""), xlab=expression(bold("CBD (%)")), ylab = expression(bold(Frequency)), col.axis="#5C666F", col.main="#5C666F", fg="#5C666F", col.lab="#5C666F")
+
+  #Histogram of all CBDA measures
+  hist(pt$CBDA[pt$Round==j],freq=TRUE, main=expression(""), xlab=expression(bold("CBDA (%)")), ylab = expression(bold(Frequency)), col.axis="#5C666F", col.main="#5C666F", fg="#5C666F", col.lab="#5C666F")
+
+  #Histogram of all CBN measures
+  hist(pt$CBN[pt$Round==j],freq=TRUE, main=expression(""), xlab=expression(bold("CBN (%)")), ylab = expression(bold(Frequency)), col.axis="#5C666F", col.main="#5C666F", fg="#5C666F", col.lab="#5C666F")
+
+#}
+mtext("Title for Two Plots", outer = TRUE, cex = 1.5)
+par(opar)
+
+```
+
+-----
+
+##R Session Information
+
+```{r, SessionInfo, echo=T, cache=T, warning=FALSE}
+sessionInfo()
+
+```
+
+
